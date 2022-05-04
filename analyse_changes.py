@@ -1,6 +1,6 @@
 import operator
 
-from DBHandler import DBHandler
+from dbhandler import DBHandler
 
 
 def main():

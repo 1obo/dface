@@ -2,7 +2,7 @@
 Web Defacement Monitoring
 
 Use multiple fuzzy hashing techniques to determine whether a URI has significantly changed.
-Hases currently used:
+Hashes currently used:
  - html content
  - - ssdeep
  

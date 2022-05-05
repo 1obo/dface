@@ -28,7 +28,7 @@ def get_monitored_uris(fname, spider):
             uri = line.strip()
 
             page = spider.get(uri)
-            page.defacement = False
+            page.type = 'monitored'
             pages.append(page)
 
     return pages

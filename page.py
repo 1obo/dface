@@ -10,7 +10,7 @@ class Page:
     def __init__(self, uri):
         self.labels = {}
         self.uri = uri
-        self.defacement = None
+        self.type = None
         self.image = None
         self.html = None
         self.ts = None
@@ -65,8 +65,7 @@ class Page:
 
 
     def __str__(self):
-        return (f"URI: {self.uri}\n"
-                f"TS: {self.ts}   Defacement:{self.defacement}\n"
+        return (f"URI: {self.uri}   TS: {self.ts}   Type:{self.type}\n"
                 f"HTML: {self.html[:20]}\n"
                 f"IMG: {self.image[:20]}\n"
                 f"LABELS: {self.labels}")

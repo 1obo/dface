@@ -1,7 +1,7 @@
 import sqlite3
-from os.path import exists
 
 from page import Page
+
 
 class DBHandler:
 
@@ -40,8 +40,8 @@ class DBHandler:
     def store_page(self, page):
         # Remove all labels and pages matching ts, defacement & uri
         rs = self.execute('''SELECT id FROM pages WHERE
-        timestamp=:t AND defacement=:d AND uri=:u''',
-                          {"t": page.ts, "d": page.defacement, "u": page.uri})
+        timestamp=:ts AND type=:t AND uri=:u''',
+                          {"ts": page.ts, "t": page.type, "u": page.uri})
         for row in rs:
             row_id = row[0]
             # self.execute('''DELETE FROM labels WHERE id=:id''', {"id": row_id})
@@ -49,9 +49,9 @@ class DBHandler:
 
         # Insert page and labels
 
-        self.execute(''' INSERT INTO pages(timestamp, defacement, uri, html, image) VALUES (
-        :t, :d, :u, :h, :i)''',
-                     {"t": page.ts, "d": page.defacement, "u": page.uri,
+        self.execute(''' INSERT INTO pages(timestamp, type, uri, html, image) VALUES (
+        :ts, :t, :u, :h, :i)''',
+                     {"ts": page.ts, "t": page.type, "u": page.uri,
                       "h": page.html, "i": page.image})
 
         page_id = self.last_row_id()
@@ -61,21 +61,21 @@ class DBHandler:
                          {"k": key, "v": page.get(key), "id": page_id})
 
     def get_all_pages(self):
-        return self.get_pages('''SELECT id, timestamp, defacement, uri, html, image FROM pages''')
+        return self.get_pages('''SELECT id, timestamp, type, uri, html, image FROM pages''')
 
     def get_defaced_pages(self):
         # return self.get_pages('''SELECT id, timestamp, defacement, uri, html, image FROM pages WHERE defacement=:t''', {"t": True})
-        return self.get_pages('''SELECT pages.id, pages.timestamp, pages.defacement, pages.uri, pages.html, pages.image 
-        FROM pages, labels WHERE pages.defacement=1 AND pages.id = labels.page_id AND
+        return self.get_pages('''SELECT pages.id, pages.timestamp, pages.type, pages.uri, pages.html, pages.image 
+        FROM pages, labels WHERE pages.type="defacement" AND pages.id = labels.page_id AND
          labels.key = 'ssdeep_hash' GROUP BY labels.value''')
 
     def get_latest_monitored_pages(self):
-        return self.get_pages('''SELECT id, max(timestamp), defacement, uri, html, image 
-        FROM pages WHERE defacement=False GROUP BY uri''')
+        return self.get_pages('''SELECT id, max(timestamp), type, uri, html, image 
+        FROM pages WHERE type="monitored" GROUP BY uri''')
 
     def get_monitored_pages(self):
-        return self.get_pages('''SELECT id, timestamp, defacement, uri, html, image
-         FROM pages WHERE defacement=False''')
+        return self.get_pages('''SELECT id, timestamp, type, uri, html, image
+         FROM pages WHERE type="monitored"''')
 
     def get_pages(self, sql, args=None):
         pages = []
@@ -85,7 +85,7 @@ class DBHandler:
             page_id = row[0]
             page = Page(row[3])
             page.ts = row[1]
-            page.defacement = row[2]
+            page.type = row[2]
             page.html = row[4]
             page.image = row[5]
 
@@ -106,9 +106,9 @@ class DBHandler:
                            {"u": uri})
 
     def get_last_two_versions(self, uri):
-        pages = self.get_pages('''select id, timestamp, defacement, uri, html, image FROM pages WHERE uri=:u
+        pages = self.get_pages('''select id, timestamp, type, uri, html, image FROM pages WHERE uri=:u
          ORDER BY timestamp DESC LIMIT 1;''', {"u": uri})
-        pages.extend(self.get_pages('''select id, timestamp, defacement, uri, html, image FROM pages WHERE uri=:u
+        pages.extend(self.get_pages('''select id, timestamp, type, uri, html, image FROM pages WHERE uri=:u
          ORDER BY timestamp DESC LIMIT 1 OFFSET 1;''', {"u": uri}))
         # If we don't have 2 version, return None
         if len(pages) == 2:
@@ -120,9 +120,8 @@ class DBHandler:
         label_rs = self.fetchall('''SELECT key, value FROM labels WHERE page_id=:id''',
                                  {"id": page_id})
         for label_row in label_rs:
-            labels[label_row[0]] =  label_row[1]
+            labels[label_row[0]] = label_row[1]
         return labels
-
 
     def close(self):
         self.cur.close()
@@ -139,7 +138,7 @@ class DBHandler:
         CREATE TABLE IF NOT EXISTS pages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER,
-        defacement BOOLEAN,
+        type TEXT,
         uri TEXT,
         html TEXT,
         image BLOB
@@ -172,4 +171,3 @@ class DBHandler:
 
         # for line in self.conn.iterdump():
         #     print(line)
-

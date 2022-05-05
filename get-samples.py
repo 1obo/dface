@@ -6,8 +6,8 @@ from selenium.webdriver.common.by import By
 
 def main():
     db_file = "/home/lobo/PycharmProjects/dface/dface.sqlite"
-    start_page = 1
-    max_samples = 25
+    start_page = 5
+    max_samples = 20
     mirrored_pages = []  # "http://zone-h.org/mirror/id/39688641"]
 
     db = DBHandler(db_file)
@@ -56,6 +56,10 @@ def get_zoneh_samples(start_page, max_samples, spider):
 
 def get_mirrored_page(link, spider):
     spider.get(link)
+    notified_by = match_regex(spider.find_element(
+        by=By.XPATH,
+        value="(//li[@class='defacef'])[1]").get_attribute("innerHTML"),
+                         '.+?<\/strong>\s*(.+?)$')
     domain = match_regex(spider.find_element(
         by=By.XPATH,
         value="(//li[@class='defaces'])[1]").get_attribute("innerHTML"),
@@ -76,7 +80,8 @@ def get_mirrored_page(link, spider):
     sample = spider.find_element(by=By.XPATH, value="//iframe").get_attribute("src")
 
     page = spider.get(sample)
-    page.defacement = True
+    page.type = 'defacement'
+    page.put('notified_by', notified_by)
     page.put('domain', domain)
     page.put('ip', ip)
     page.put('system', system)

@@ -14,4 +14,4 @@ If the page has changed sufficiently, alert on change and compare the new hashes
 
 Known defacements are currently pulled from zone-h.org.
 
-Added ability to create/detect/alert on new change types (e.g. 5xx and 4xx server errors) as well as defacements.
+Added ability to create/detect/alert new change types (e.g. 5xx and 4xx server errors) as well as defacements.

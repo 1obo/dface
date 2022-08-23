@@ -13,3 +13,5 @@ Hashes currently used:
 If the page has changed sufficiently, alert on change and compare the new hashes to known defacements in an attempt to identify the attacker.
 
 Known defacements are currently pulled from zone-h.org.
+
+Added ability to create/detect/alert on new change types e.g. 5xx and 4xx server errors.

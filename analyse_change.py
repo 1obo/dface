@@ -11,18 +11,25 @@ def main():
     monitored_pages = db.get_latest_monitored_pages()
     defaced_pages = db.get_defaced_pages()
 
+    print(f"Checking for changes across ({len(monitored_pages)}) URIs:")
     changed_pages = []
     for page in monitored_pages:
         # Get last 2 hash sets for each monitored page
         # to see if page has changed significantly
         pages = db.get_last_two_versions(page.uri)
         if pages:
-            pages[0].compute_hashes()
-            pages[1].compute_hashes()
+            pages[0].compute_hashes() # Hashes are computed during download - needed for demo
+            pages[1].compute_hashes() # Hashes are computed during download - needed for demo
             similarity = pages[0].compare_hashes(pages[1])
-            print(f"URI: {pages[0].uri} Similarity: {similarity}/100\n")
+            print(f"URI1: {pages[0].uri} (TS: {pages[0].ts})   URI2: {pages[1].uri} (TS: {pages[1].ts})")
+            print(f"   Similarity: {similarity}/100", end="")
             if similarity < 30:
                 changed_pages.append(pages[0])
+                print(" - URI has changed!")
+            else:
+                print(" - URI has not changed")
+
+    print(f"\nChecking ({len(changed_pages)}) changed URIs for known defacements")
 
     possible_defacements = {}
     for monitored_page in changed_pages:
@@ -33,13 +40,14 @@ def main():
                 candidates[defaced_sample_page] = similarity
         possible_defacements[monitored_page] = candidates
 
-    if len(possible_defacements) > 0:
-        for mon_page, pd in possible_defacements.items():
-            for (defacement, score) in sorted(pd.items(), key=operator.itemgetter(1)):
-                print(f"Defacement Alert: URI: {mon_page.uri} Similar defacement: {defacement.uri} Confidence: {score}")
-                # print(f"URI: {monitored_page.uri} Defacement: {defaced_sample_page.uri} Similarity: {similarity}/100")
-    else:
-        print("No defacements detected")
+    known_defacements = 0
+    for mon_page, pd in possible_defacements.items():
+        for (defacement, score) in sorted(pd.items(), key=operator.itemgetter(1)):
+            known_defacements += 1
+            print(f"   Defacement Alert: URI: {mon_page.uri} Similar defacement: {defacement.uri} Confidence: {score}")
+            # print(f"URI: {monitored_page.uri} Defacement: {defaced_sample_page.uri} Similarity: {similarity}/100")
+
+    print(f"\nFound ({known_defacements}) known defacements")
 
     db.close()
 

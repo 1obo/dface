@@ -20,8 +20,8 @@ class Spider:
         self.settle_delay = 1
         self.last_request_ts = None
 
-        # self.display = Display(visible=0, size=(1920, 1080))
-        # self.display.start()
+        self.display = Display(visible=0, size=(1920, 1080))
+        self.display.start()
 
         self.browser = webdriver.Firefox()
         # self.browser = webdriver.Chrome()

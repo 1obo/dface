@@ -6,8 +6,8 @@ from selenium.webdriver.common.by import By
 
 def main():
     db_file = "/home/lobo/PycharmProjects/dface/dface.sqlite"
-    start_page = 5
-    max_samples = 20
+    start_page = 1
+    max_samples = 5
     mirrored_pages = []  # "http://zone-h.org/mirror/id/39688641"]
 
     db = DBHandler(db_file)

@@ -50,14 +50,14 @@ class Page:
         p_value = 100 - (hamming(self.get('p_hash'), other_page.get('p_hash')) * len(self.get('p_hash')))
         score = int((ssdeep_value + p_value + d_value) / 3)
 
-        print(f"URI1: {self.uri} (TS: {self.ts})   URI2: {other_page.uri} (TS: {other_page.ts})")
-        print(f"ssdeep_hash1: {self.get('ssdeep_hash')}\n"
-              f"ssdeep_hash2: {other_page.get('ssdeep_hash')}\n")
-        print(f"p_hash1: {self.get('p_hash')}\n"
-              f"p_hash2: {other_page.get('p_hash')}\n")
-        print(f"d_hash1: {self.get('d_hash')}\n"
-              f"d_hash2: {other_page.get('d_hash')}\n\n"
-              f"Score: {score}/100\n")
+        # print(f"URI1: {self.uri} (TS: {self.ts})   URI2: {other_page.uri} (TS: {other_page.ts})")
+        # print(f"ssdeep_hash1: {self.get('ssdeep_hash')}\n"
+        #       f"ssdeep_hash2: {other_page.get('ssdeep_hash')}\n")
+        # print(f"p_hash1: {self.get('p_hash')}\n"
+        #       f"p_hash2: {other_page.get('p_hash')}\n")
+        # print(f"d_hash1: {self.get('d_hash')}\n"
+        #       f"d_hash2: {other_page.get('d_hash')}\n\n")
+        # print(f"Score: {score}/100\n")
 
         return score
 

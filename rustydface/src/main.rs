@@ -88,7 +88,7 @@ fn main() -> Result<(), String> {
                     let log_type:String = "ALERT".to_string();
                     let message = format!(
                         "\
-                    The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
+                    The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}",
                         &monitor.uri, &new_page.timestamp, &diff
                     );
                     //create alert/log
@@ -103,7 +103,7 @@ fn main() -> Result<(), String> {
                     let log_type:String = "LOG".to_string();
                     let message = format!(
                         "\
-                    The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
+                    The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}",
                         &monitor.uri, &latest_page.timestamp, &diff
                     );
                     let logs = get_logs(&new_page.timestamp, &log_type, &message, &conn);
@@ -149,13 +149,14 @@ fn compare_pages(page1: &Page, page2: &Page) -> u32 {
     let new_phash: ImageHash<Box<[u8]>> =
         ImageHash::from_base64(&page2.phash).expect("Failed to get ImageHash");
     let sshashcomp = compare(&old_sshash, &new_sshash).expect("Failed to compare pages");
-    let phashcomp = &old_phash.dist(&new_phash);
-    let diff = (sshashcomp + phashcomp) / 2;
+    let phash_ham_dist = &old_phash.dist(&new_phash);
+    let phashcomp:u32 = 100 * (1 - phash_ham_dist / 72);
+    let similarity_rating = (sshashcomp + phashcomp) / 2;
     println!(
-        "sshash difference: {:?}, phashcomp difference: {:?}, overall difference: {:?}",
-        sshashcomp, phashcomp, diff
+        "sshash similarity: {:?}, phashcomp similarity: {:?}, overall similarity: {:?}",
+        sshashcomp, phashcomp, similarity_rating
     );
-    sshashcomp
+    similarity_rating
 }
 fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
     conn.execute(
@@ -308,7 +309,7 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                  (uri, frequency, threshold, retention) \
                  VALUES (?1, ?2, ?3, ?4)\
                  ",
-        params![String::from("https://www2.gov.bc.ca/gov/content/home"), 2, 80, 86400],
+        params![String::from("https://www.google.com"), 2, 80, 86400],
     );
     Ok(conn)
 }

@@ -7,17 +7,16 @@ use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::*;
 use ssdeep::*;
 use std::error::Error;
+use std::ffi::CString;
 use std::fmt;
 use std::fmt::{Debug, Display};
-use std::fs::File;
-use std::io::Cursor;
-use std::io::Read;
+use std::fs::{File, remove_file};
+use std::io::{Cursor, Read};
 use std::path::Path;
 use std::string::String;
 use thirtyfour::prelude::*;
 use thirtyfour::support::base64_decode;
-
-struct Logging {
+struct Logging{
     timestamp: u32,
     log_type: String,
     message: String,
@@ -76,9 +75,8 @@ fn main() -> Result<(), String> {
             let latest_page = latest_page.unwrap();
             //if page is expired (Utc::now().timestamp() - monitor.frequency > timestamp ):
             let cutoff_time = (Utc::now().timestamp() as u32 - monitor.frequency);
-            println!("Good afternoon evening");
             if latest_page.timestamp < cutoff_time {
-                println!("found an expired, expired at: {}", cutoff_time);
+                println!("found an expired page, expired at: {}", cutoff_time);
                 //create a page for that monitor
                 let new_page = get_page(&monitor.uri, &conn).expect("Failed to get Page");
                 //store page to database
@@ -86,8 +84,8 @@ fn main() -> Result<(), String> {
                 //compare expired pages for differences
                 let diff = compare_pages(&new_page, &latest_page);
                 //if differences are greater than monitors threshold:
-                if diff > monitor.threshold {
-                    let log_type = "ALERT";
+                if diff < monitor.threshold {
+                    let log_type:String = "ALERT".to_string();
                     let message = format!(
                         "\
                     The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
@@ -95,45 +93,51 @@ fn main() -> Result<(), String> {
                     );
                     //create alert/log
                     //store alert/log to database
-                    println!("{}:{}", log_type, message);
-                    get_logs(&new_page.timestamp, log_type, message, &conn);
+                    let log = get_logs(&new_page.timestamp, &log_type, &message, &conn);
+                    save_logs(&log, &conn).expect("Failed to save logs");
+                    println!("{}:{}", &log_type, &message);
+
                 }
                 //else: println! no loggable differences found
                 else {
-                    let log_type = "LOG";
+                    let log_type:String = "LOG".to_string();
                     let message = format!(
                         "\
                     The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
                         &monitor.uri, &latest_page.timestamp, &diff
                     );
-                    println!("{}:{}", log_type, message);
-                    get_logs(&latest_page.timestamp, log_type, message, &conn);
+                    let logs = get_logs(&new_page.timestamp, &log_type, &message, &conn);
+                    save_logs(&logs, &conn).expect("Failed to save logs");
+                    println!("{}:{}", &log_type, &message);
+
                 }
             } else {
                 println!("found an unexpired page, expires at: {}", cutoff_time);
             }
         }
         //else: println!"Configuration error, frequency"
-        todo!(
-            "Resolve difference issue: Likely need to change phash alg, \
-        and determine a reasonable threshold when finding an average similarity/difference value across both hash values\
-        NEXT: Obtain baseline for webpages to monitor, and see if any changes are necessary from here on out"
-        );
     }
     Ok(())
 }
 
-fn get_logs(
-    page_timestamp: &u32,
-    log_type: &str,
-    message: String,
-    conn: &Connection,
-) -> Result<usize> {
+fn get_logs(page_timestamp: &u32, log_type: &String, message: &String, conn: &Connection) -> Logging {
+
+    Logging{
+        timestamp: page_timestamp.to_owned(),
+        log_type: log_type.to_string(),
+        message: message.to_string(),
+    }
+}
+fn save_logs(log:&Logging, conn: &Connection) -> Result<usize> {
     conn.execute(
         "INSERT INTO logs
-                    (timestamp, type, message)
+                    (timestamp, log_type, message)
                     VALUES (?1, ?2, ?3)",
-        params![page_timestamp, log_type, message],
+        params![
+            log.timestamp,
+            log.log_type,
+            log.message
+        ]
     )
 }
 fn compare_pages(page1: &Page, page2: &Page) -> u32 {
@@ -151,7 +155,7 @@ fn compare_pages(page1: &Page, page2: &Page) -> u32 {
         "sshash difference: {:?}, phashcomp difference: {:?}, overall difference: {:?}",
         sshashcomp, phashcomp, diff
     );
-    diff
+    sshashcomp
 }
 fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
     conn.execute(
@@ -197,6 +201,7 @@ async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
     driver.quit().await.expect("Failed to quit WebDriver");
     let sshash = get_sshash(&html);
     let phash = get_phash(&image_path);
+    remove_file(&image_path).expect("Failed to remove image file");
     Some(Page {
         uri: uri.to_string(),
         timestamp: timestamp as u32,
@@ -205,6 +210,7 @@ async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
         sshash,
         phash,
     })
+
 }
 fn get_phash(image: &Path) -> String {
     let input = open(image).expect("Failed to open image");
@@ -284,16 +290,15 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                 sshash TEXT NOT NULL,
                 phash TEXT NOT NULL,
                 PRIMARY KEY(uri,timestamp)
-                )
-                ",
+                )",
         [],
     );
     conn.execute(
         "
                 CREATE TABLE IF NOT EXISTS logs (
                 timestamp INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                message TEXT NOT NULL,
+                log_type TEXT NOT NULL,
+                message TEXT NOT NULL
                 )",
         [],
     );
@@ -303,7 +308,7 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                  (uri, frequency, threshold, retention) \
                  VALUES (?1, ?2, ?3, ?4)\
                  ",
-        params![String::from("https://www2.gov.bc.ca"), 2, 90, 86000],
+        params![String::from("https://www2.gov.bc.ca/gov/content/home"), 2, 80, 86400],
     );
     Ok(conn)
 }

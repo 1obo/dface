@@ -1,338 +1,309 @@
 #![allow(unused)]
+use base64::{Engine as _, engine::general_purpose};
 use chrono::*;
 use image::*;
 use image_hasher::*;
+use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::*;
 use ssdeep::*;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display};
+use std::fs::File;
 use std::io::Cursor;
+use std::io::Read;
+use std::path::Path;
 use std::string::String;
 use thirtyfour::prelude::*;
+use thirtyfour::support::base64_decode;
 
 struct Logging {
-    timestamp: i64,
-    uri: String,
-    similarity: u32,
+    timestamp: u32,
+    log_type: String,
+    message: String,
 }
-//Simple logging implementation for SQLite log table
-impl Logging {
-    //Constructs new logging object
-    fn new(timestamp: i64, uri: String, similarity: u32) -> Logging {
-        Logging {
-            timestamp,
-            uri,
-            similarity,
-        }
-    }
-
-    //Checking hash similarity against allowed threshold
-    fn check(logs: Logging, db: &Db, threshold: u32) {
-        if logs.similarity < threshold {
-            //Executing query accordingly
-            let foo = db.dbexecute(
-                "
-            INSERT INTO logs (timestamp, uri, similarity, action) VALUES (?1, ?2, ?3, 'ALERT') ",
-                &[&logs.timestamp, &logs.uri, &logs.similarity],
-            );
-        } else if logs.similarity > 50 && logs.similarity < 70 {
-            let foo = db.dbexecute(
-                "
-            INSERT INTO logs (timestamp, uri, similarity, action) VALUES (?1, ?2, ?3, 'Log') ",
-                &[&logs.timestamp, &logs.uri, &logs.similarity],
-            );
-        } else {
-        }
-    }
-}
-
 #[derive(Debug)]
 struct Monitor {
-    id: Option<i64>,
     uri: String,
-    frequency: i64,
+    frequency: u32,
     threshold: u32,
+    retention: u32,
 }
-
-impl Monitor {
-    //Constructing new Monitor object
-    pub fn new(uri: &str, frequency: i64, threshold: u32) -> Monitor {
-        Monitor {
-            id: None,
-            uri: uri.to_string(),
-            frequency,
-            threshold,
-        }
-    }
-
-    //Constructing Monitor object in case that we are simply updating info already correlated to ID
-    fn newwithid(id: i64, uri: &str, frequency: i64, threshold: u32) -> Monitor {
-        Monitor {
-            id: Some(id),
-            uri: uri.to_string(),
-            frequency,
-            threshold,
-        }
-    }
-    // Obtaining critical page info from Monitor table
-    fn getall(db: &Db) -> Result<Vec<Monitor>> {
-        //Querying DB to populate monitor fields
-        let mut stmt = db
-            .conn
-            .prepare("SELECT id, uri, frequency, threshold FROM monitored")?;
-        //building query map to correlate incoming data to monitor fields
-        let destinations = stmt
-            .query_map([], |row| {
-                Ok(Monitor {
-                    id: Some(row.get(0)?),
-                    uri: row.get(1)?,
-                    frequency: row.get(2)?,
-                    threshold: row.get(3)?,
-                })
-            })?
-            //collecting result set to return the monitor object
-            .collect::<Result<Vec<Monitor>>>()?;
-        Ok(destinations)
-    }
-    //representation of the URI's into a string vector for iteration in main()
-    fn repr(destinations: Vec<Monitor>) -> Vec<String> {
-        destinations.into_iter().map(|m| m.uri).collect()
-    }
-    //function to save new objects in monitor table, or update existing objects
-    fn save(&mut self, db: &Db) {
-        match &self.id {
-            Some(id) => {
-                //Updating existing monitor object
-                let var = db.dbexecute(
-                    "UPDATE monitored SET uri = ?1, frequency = ?2 WHERE id = ?3",
-                    &[&self.uri, &self.frequency, id],
-                );
-            }
-            None => {
-                //Inserting new monitor object into table
-                let foo = db.dbexecute(
-                    "INSERT INTO monitored (uri, frequency) VALUES (?1, ?2)",
-                    &[&self.uri, &self.frequency],
-                );
-                let id = db.conn.last_insert_rowid();
-                self.id = Some(id);
-            }
-        }
-    }
-}
-// Simple display implementation for monitor objects
-impl Display for Monitor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "id:{:?}, uri:{:?}, frequency:{:?}",
-            self.id, self.uri, self.frequency
-        )
-    }
-}
-
-//structure for Database object
-struct Db {
-    file: String,
-    conn: Connection,
-}
-
-impl Db {
-    //Creation of database object
-    fn new() -> Result<Db, Box<dyn Error>> {
-        //Specified filename statically coded in this case
-        let file = "dface.sqlite".to_string();
-        //Connection definition for reference in main()
-        let conn = Connection::open(file.clone()).expect("sqlite open error");
-        Ok(Db { file, conn })
-    }
-    // Function to execute SQL in SQLite DB
-    fn dbexecute(&self, statement: &str, params: &[&dyn ToSql]) -> Result<()> {
-        self.conn
-            .execute(statement, params)
-            .expect("dbexecute error");
-        Ok(())
-    }
-}
-
 #[derive(Debug)]
 // Structure for page object
 struct Page {
-    uri: Option<String>,
+    uri: String,
     html: String,
-    timestamp: i64,
+    timestamp: u32,
     sshash: String,
-    image: DynamicImage,
+    image: Option<Vec<u8>>,
+    phash: String,
 }
-impl Page {
-    #[tokio::main]
-    //Asynchronus function for creation of new page object
-    async fn new(uri: &str) -> WebDriverResult<Self> {
-        //Specifying webdriver capabilities
-        let capabilities = DesiredCapabilities::chrome();
-        //Creating webdriver object
-        let driver = WebDriver::new("http://localhost:11111", capabilities)
-            .await
-            .expect("Failed to connect to WebDriver");
-        //Setting browser resolution for future image hashing capabilities
-        driver.set_window_rect(1, 1, 1920, 1080);
-        //Directing browser to uri sourced from the page structure
-        driver
-            .goto(uri)
-            .await
-            .expect("Failed to get URI from WebDriver");
-        //grabbing html from specified webpage
-        let html = driver
-            .source()
-            .await
-            .expect("Failed to get HTML from WebDriver");
-        //grabbing byte array of png screenshot for perceptual hashing
-        let screenshot = driver
-            .screenshot_as_png()
-            .await
-            .expect("Failed to get image from WebDriver");
-        let image = ImageReader::new(Cursor::new(&screenshot))
-            .with_guessed_format()?
-            .decode()
-            .expect("Failed to decode image from WebDriver");
-        //defining timestamp as current time in UTC
-        let timestamp = Utc::now().timestamp();
-        //Closing browser window
-        driver.quit().await;
-        //Hashing html
-        let sshash = Self::hashhtml(&html).await;
-        let imghash = Self::hashimg(&image);
-        //Instantiating page object as a result set
-        Ok(Page {
-            uri: Some(uri.to_string()),
-            html,
-            timestamp,
-            sshash,
-            image,
+fn main() -> Result<(), String> {
+    // Creating the database connection
+    let filename = String::from("dface.sqlite");
+    let conn = get_data_base_connection(&filename).expect("Failed to get database connection");
+
+    //Get all monitors
+    let monitors = get_monitors(&conn);
+    println!("{:?}", monitors);
+    //if monitor.retention > monitor.frequency:
+    for monitor in monitors {
+        if &monitor.frequency >= &monitor.retention {
+            return Err(format!(
+                "Configuration error: The frequency: {:?} for {:?} has exceeded the retention value of {:?}.",
+                &monitor.frequency, &monitor.uri, &monitor.retention
+            ));
+        }
+    }
+    //For each monitor:
+    for monitor in get_monitors(&conn) {
+        //Delete expired pages based on monitor retention
+        delete_expired(&monitor.uri, &monitor.retention, &conn);
+        //Get the latest page FOR each monitor.uri limit 1
+        let latest_page = get_latest_page(&monitor.uri, &conn);
+        // if results are 0:
+        if latest_page.is_none() {
+            //There are no pages inside Db for this monitor
+            println!("Current monitor has no record in Page table, creating Page now...");
+            //Create a page for that monitor
+            let new_page = get_page(&monitor.uri, &conn).expect("Failed to get Page");
+            //store page to database
+            save_page(&new_page, &conn).expect("Failed to save Page");
+        }
+        //else if results are 1:
+        else {
+            let latest_page = latest_page.unwrap();
+            //if page is expired (Utc::now().timestamp() - monitor.frequency > timestamp ):
+            let cutoff_time = (Utc::now().timestamp() as u32 - monitor.frequency);
+            println!("Good afternoon evening");
+            if latest_page.timestamp < cutoff_time {
+                println!("found an expired, expired at: {}", cutoff_time);
+                //create a page for that monitor
+                let new_page = get_page(&monitor.uri, &conn).expect("Failed to get Page");
+                //store page to database
+                save_page(&new_page, &conn).expect("Failed to save Page");
+                //compare expired pages for differences
+                let diff = compare_pages(&new_page, &latest_page);
+                //if differences are greater than monitors threshold:
+                if diff > monitor.threshold {
+                    let log_type = "ALERT";
+                    let message = format!(
+                        "\
+                    The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
+                        &monitor.uri, &new_page.timestamp, &diff
+                    );
+                    //create alert/log
+                    //store alert/log to database
+                    println!("{}:{}", log_type, message);
+                    get_logs(&new_page.timestamp, log_type, message, &conn);
+                }
+                //else: println! no loggable differences found
+                else {
+                    let log_type = "LOG";
+                    let message = format!(
+                        "\
+                    The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash difference of: {:?}",
+                        &monitor.uri, &latest_page.timestamp, &diff
+                    );
+                    println!("{}:{}", log_type, message);
+                    get_logs(&latest_page.timestamp, log_type, message, &conn);
+                }
+            } else {
+                println!("found an unexpired page, expires at: {}", cutoff_time);
+            }
+        }
+        //else: println!"Configuration error, frequency"
+        todo!(
+            "Resolve difference issue: Likely need to change phash alg, \
+        and determine a reasonable threshold when finding an average similarity/difference value across both hash values\
+        NEXT: Obtain baseline for webpages to monitor, and see if any changes are necessary from here on out"
+        );
+    }
+    Ok(())
+}
+
+fn get_logs(
+    page_timestamp: &u32,
+    log_type: &str,
+    message: String,
+    conn: &Connection,
+) -> Result<usize> {
+    conn.execute(
+        "INSERT INTO logs
+                    (timestamp, type, message)
+                    VALUES (?1, ?2, ?3)",
+        params![page_timestamp, log_type, message],
+    )
+}
+fn compare_pages(page1: &Page, page2: &Page) -> u32 {
+    println!("1 {} and 2 {}", &page1.phash, &page2.phash);
+    let old_sshash = &page1.sshash;
+    let new_sshash = &page2.sshash;
+    let old_phash: ImageHash<Box<[u8]>> =
+        ImageHash::from_base64(&page1.phash).expect("Failed to get ImageHash");
+    let new_phash: ImageHash<Box<[u8]>> =
+        ImageHash::from_base64(&page2.phash).expect("Failed to get ImageHash");
+    let sshashcomp = compare(&old_sshash, &new_sshash).expect("Failed to compare pages");
+    let phashcomp = &old_phash.dist(&new_phash);
+    let diff = (sshashcomp + phashcomp) / 2;
+    println!(
+        "sshash difference: {:?}, phashcomp difference: {:?}, overall difference: {:?}",
+        sshashcomp, phashcomp, diff
+    );
+    diff
+}
+fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
+    conn.execute(
+        "INSERT INTO pagesample \
+                (uri, timestamp, html, image, sshash, phash) \
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            &page.uri,
+            &page.timestamp,
+            &page.html,
+            &page.image,
+            &page.sshash,
+            &page.phash
+        ],
+    )
+}
+#[tokio::main]
+async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
+    let mut capabilities = DesiredCapabilities::chrome();
+    capabilities.add_arg("--headless");
+    let driver = WebDriver::new("http://localhost:52061", capabilities)
+        .await
+        .expect("Failed to connect to WebDriver");
+    driver.set_window_rect(1, 1, 1920, 1080);
+    driver
+        .goto(uri)
+        .await
+        .expect("Failed to get URI from WebDriver");
+    let html = driver
+        .source()
+        .await
+        .expect("Failed to get HTML from WebDriver");
+    let image_path = "car-967470-1280.png".as_ref();
+    let screenshot = driver.screenshot(&image_path).await.unwrap();
+    let mut file = File::open(&image_path).expect("Failed to open screenshot");
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)
+        .expect("Failed to read screenshot");
+    // let image = ImageReader::new(Cursor::new(&image_path))
+    //     .with_guessed_format().expect("")
+    //     .decode().expect("NAH");
+    let timestamp = Utc::now().timestamp();
+    driver.quit().await.expect("Failed to quit WebDriver");
+    let sshash = get_sshash(&html);
+    let phash = get_phash(&image_path);
+    Some(Page {
+        uri: uri.to_string(),
+        timestamp: timestamp as u32,
+        html,
+        image: Some(buffer),
+        sshash,
+        phash,
+    })
+}
+fn get_phash(image: &Path) -> String {
+    let input = open(image).expect("Failed to open image");
+    let hasher = HasherConfig::new().to_hasher();
+    let phash = hasher.hash_image(&input);
+    phash.to_base64()
+}
+fn get_sshash(html: &String) -> String {
+    let sshash = hash_buf(&html.as_bytes());
+    sshash.unwrap().to_string()
+}
+fn get_latest_page(uri: &String, conn: &Connection) -> Option<Page> {
+    let mut stmt = conn
+        .prepare("SELECT uri, timestamp, html, sshash, phash FROM pagesample WHERE uri = ?1 ORDER BY timestamp DESC LIMIT 1").expect("Failed to prepare statement");
+    let mut rows = stmt.query(params![&uri]).expect("Failed to query results");
+    let latest_page = if let Some(row) = rows.next().unwrap() {
+        Some(Page {
+            uri: row.get(0).expect("Failed to get page uri"),
+            timestamp: row.get(1).expect("Failed to get page timestamp"),
+            html: row.get(2).expect("Failed to get page html"),
+            image: None,
+            sshash: row.get(3).expect("Failed to get page sshash"),
+            phash: row.get(4).expect("Failed to get page phash"),
         })
-    }
-
-    //Using ffuzzy/ssdeep to generate ffuzzy hashes of html
-    async fn hashhtml(html: &str) -> String {
-        let sshash1 = hash_buf(html.as_bytes());
-        sshash1.unwrap().to_string()
-    }
-    fn hashimg(image: &DynamicImage) -> ImageHash {
-        let hasher = HasherConfig::new().to_hasher();
-        let imghash1 = hasher.hash_image(image);
-        imghash1
-    }
-
-    //function to obtain all page objects from page table
-    fn getall(db: &Db) -> Result<Vec<Page>> {
-        //querying DB
-        let mut stmt = db.conn.prepare(
-            // need to add image to query for get all
-            "SELECT uri, html, timestamp, sshash FROM pagesample",
-        )?;
-        //Building querymap for retrieved data correlation to page values
-        let sources = stmt
-            .query_map([], |row| {
-                let screenshot:Vec<u8> = row.get(2).expect("Failed to get image from DB");
-                let image = ImageReader::new(Cursor::new(&screenshot))
-                    .with_guessed_format()
-                    .expect("NO")
-                    .decode()
-                    .expect("Failed to decode image from WebDriver");
-                Ok(Page {
-                    uri: Some(row.get(0)?),
-                    html: row.get(1)?,
-                    image,
-                    sshash: row.get(3)?,
-                    timestamp: row.get(6)?,
-                })
-            })?
-            //Collecting for use within main()
-            .collect::<Result<Vec<Page>>>()?;
-        Ok(sources)
-    }
-    //Function that compares last recorded hash value for html from DB to freshly acquired value, as well as update tables
-    fn compare(monitor: &Monitor, db: &Db) -> () {
-        //preparing query for execution
-        let mut stmt = db.conn.prepare("
-            SELECT uri, html, timestamp, sshash, image FROM pagesample WHERE uri = ?1 AND timestamp <= ?2
-            ORDER BY timestamp DESC LIMIT 2").expect("Could not prepare query");
-        //Defining frequency value that specifies an interval in which these values are considered expired
-        let oldest_monitor = Utc::now().timestamp() - monitor.frequency;
-        //Executing query, and returning values into rows for correlation to Page values
-        let page = stmt.query_row([&monitor.uri, &oldest_monitor.to_string()], |row| {
-            let screenshot:Vec<u8> = row.get(2).expect("Failed to get image from DB");
-            let image = ImageReader::new(Cursor::new(&screenshot))
-                .with_guessed_format()
-                .expect("NO")
-                .decode()
-                .expect("Failed to decode image from WebDriver");
-            //need to add image for page object creation
-            Ok(Page {
-                uri: row.get(0)?,
-                html: row.get(1)?,
-                image,
-                sshash: row.get(3)?,
-                timestamp: row.get(2)?,
-            })
-        });
-        //Creating new instance of page object using URI
-        let page2 = Page::new(&monitor.uri).expect("Could not create new page");
-        //Creating variable that holds previous fuzzy hash
-        let mut oldhash = page.unwrap().sshash;
-        //Creating variable that holds recently obtained fuzzy hash
-        let mut newhash = page2.sshash;
-        //Comparing hashes, outputting a similarity score from 0-100
-        let hashcomp = compare(&oldhash, &newhash);
-        //Instantiating Logging object
-        let mut similarity_check =
-            Logging::new(page2.timestamp, monitor.uri.clone(), hashcomp.unwrap());
-        //Checking similarity score against monitored URI threshold and alerting if necessary
-        Logging::check(similarity_check, &db, monitor.threshold);
-        //Match case for error handling
-        match hashcomp {
-            Ok(hashcomp) => {
-                println!(
-                    "Hash comparison for: {}. URI Threshold recorded as: {}, hash similarity rating reported as: {}",
-                    monitor.uri, monitor.threshold, hashcomp
-                );
-            }
-            Err(e) => {
-                println!("Hash comparison for {} failed: {}", monitor.uri, e);
-            }
-        }
-    }
-
-    //Save function to generate new pages in table
-    fn save(&mut self, db: &Db) {
-        match &self.uri {
-            Some(uri) => {
-                let var = db.dbexecute(
-                    "INSERT INTO pagesample (timestamp, uri, html, image, sshash) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    &[&self.timestamp, &self.uri, &self.html, &self.image.as_bytes(), &self.sshash ]
-                );
-            }
-            None => {}
-        }
-    }
-    //Remove function to delete rows beyond specified retention(Statically coded @ 1mo/enoch
-    fn remove(&mut self, db: &Db) {
-        let mut data_retention = Local::now().timestamp() - 2629743;
-        match &self.uri {
-            Some(uri) => {
-                let foo = db.dbexecute(
-                    "DELETE FROM pagesample WHERE timestamp = ?1 AND uri = ?2",
-                    &[&self.timestamp, &uri],
-                );
-            }
-            None => {}
-        }
-    }
+    } else {
+        None
+    };
+    latest_page
 }
-
-fn main() {
-    let db = Db::new().unwrap();
-    let mut destinations = Monitor::getall(&db).unwrap();
-    let mut compare = destinations.iter().for_each(|m| Page::compare(&m, &db));
+fn delete_expired(uri: &String, retention: &u32, conn: &Connection) {
+    let pageretention = Utc::now().timestamp() as u32 - retention;
+    conn.execute(
+        "\
+    DELETE FROM pagesample WHERE uri = ?1 AND timestamp < ?2",
+        params![uri, pageretention],
+    )
+    .expect("Failed to delete expired page");
+}
+fn get_monitors(conn: &Connection) -> Vec<Monitor> {
+    let mut stmt = conn
+        .prepare("SELECT  uri, frequency, threshold, retention FROM monitored")
+        .expect("Failed to prepare statement");
+    //building query map to correlate incoming data to monitor fields
+    let monitors = stmt
+        .query_map([], |row| {
+            Ok(Monitor {
+                uri: row.get(0)?,
+                frequency: row.get(1)?,
+                threshold: row.get(2)?,
+                retention: row.get(3)?,
+            })
+        })
+        .expect("Failed to get monitors")
+        .collect::<Result<Vec<Monitor>>>()
+        .expect("Failed to output results");
+    monitors
+}
+fn get_data_base_connection(file: &String) -> Result<Connection> {
+    let conn = Connection::open(file)?;
+    conn.execute(
+        "
+                CREATE TABLE IF NOT EXISTS monitored (
+	            uri TEXT PRIMARY KEY,
+	            frequency INTEGER NOT NULL,
+	            threshold INTEGER NOT NULL,
+                retention INTEGER NOT NULL
+                )",
+        [],
+    );
+    conn.execute(
+        "
+                CREATE TABLE IF NOT EXISTS pagesample (
+                uri TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                html TEXT NOT NULL,
+                image BLOB NOT NULL,
+                sshash TEXT NOT NULL,
+                phash TEXT NOT NULL,
+                PRIMARY KEY(uri,timestamp)
+                )
+                ",
+        [],
+    );
+    conn.execute(
+        "
+                CREATE TABLE IF NOT EXISTS logs (
+                timestamp INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                )",
+        [],
+    );
+    conn.execute(
+        "\
+                 INSERT INTO monitored\
+                 (uri, frequency, threshold, retention) \
+                 VALUES (?1, ?2, ?3, ?4)\
+                 ",
+        params![String::from("https://www2.gov.bc.ca"), 2, 90, 86000],
+    );
+    Ok(conn)
 }

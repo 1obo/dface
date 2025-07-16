@@ -22,5 +22,4 @@ rusqlite = { version = "0.37.0", features = ["chrono"] }
 
 image = "0.25.6"
 
-
-stringreader = "0.1.1"
+base64 = "0.22.1"

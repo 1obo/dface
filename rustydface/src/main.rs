@@ -1,5 +1,4 @@
 #![allow(unused)]
-use base64::{Engine as _, engine::general_purpose};
 use chrono::*;
 use image::*;
 use image_hasher::*;
@@ -7,15 +6,10 @@ use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::*;
 use ssdeep::*;
 use std::error::Error;
-use std::ffi::CString;
-use std::fmt;
 use std::fmt::{Debug, Display};
-use std::fs::{File, remove_file};
-use std::io::{Cursor, Read};
-use std::path::Path;
 use std::string::String;
+use thirtyfour::extensions::addons::firefox::FirefoxTools;
 use thirtyfour::prelude::*;
-use thirtyfour::support::base64_decode;
 struct Logging{
     timestamp: u32,
     log_type: String,
@@ -38,7 +32,8 @@ struct Page {
     image: Option<Vec<u8>>,
     phash: String,
 }
-fn main() -> Result<(), String> {
+#[tokio::main]
+async fn main() -> Result<(), String> {
     // Creating the database connection
     let filename = String::from("dface.sqlite");
     let conn = get_data_base_connection(&filename).expect("Failed to get database connection");
@@ -121,7 +116,6 @@ fn main() -> Result<(), String> {
 }
 
 fn get_logs(page_timestamp: &u32, log_type: &String, message: &String, conn: &Connection) -> Logging {
-
     Logging{
         timestamp: page_timestamp.to_owned(),
         log_type: log_type.to_string(),
@@ -175,12 +169,13 @@ fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
 }
 #[tokio::main]
 async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
-    let mut capabilities = DesiredCapabilities::chrome();
+    let mut capabilities = DesiredCapabilities::firefox();
     capabilities.add_arg("--headless");
-    let driver = WebDriver::new("http://localhost:52061", capabilities)
+
+    let driver = WebDriver::new("http://localhost:4444", capabilities)
         .await
         .expect("Failed to connect to WebDriver");
-    driver.set_window_rect(1, 1, 1920, 1080);
+    let tools = FirefoxTools::new(driver.handle.clone());
     driver
         .goto(uri)
         .await
@@ -189,32 +184,23 @@ async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
         .source()
         .await
         .expect("Failed to get HTML from WebDriver");
-    let image_path = "car-967470-1280.png".as_ref();
-    let screenshot = driver.screenshot(&image_path).await.unwrap();
-    let mut file = File::open(&image_path).expect("Failed to open screenshot");
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .expect("Failed to read screenshot");
-    // let image = ImageReader::new(Cursor::new(&image_path))
-    //     .with_guessed_format().expect("")
-    //     .decode().expect("NAH");
+    let screenshot = tools.full_screenshot_as_png().await.unwrap();
     let timestamp = Utc::now().timestamp();
     driver.quit().await.expect("Failed to quit WebDriver");
     let sshash = get_sshash(&html);
-    let phash = get_phash(&image_path);
-    remove_file(&image_path).expect("Failed to remove image file");
+    let phash = get_phash(&screenshot);
     Some(Page {
         uri: uri.to_string(),
         timestamp: timestamp as u32,
         html,
-        image: Some(buffer),
+        image: Some(screenshot),
         sshash,
         phash,
     })
 
 }
-fn get_phash(image: &Path) -> String {
-    let input = open(image).expect("Failed to open image");
+fn get_phash(image: &Vec<u8>) -> String {
+    let input = load_from_memory(image).expect("Failed to load image");
     let hasher = HasherConfig::new().to_hasher();
     let phash = hasher.hash_image(&input);
     phash.to_base64()
@@ -309,7 +295,7 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                  (uri, frequency, threshold, retention) \
                  VALUES (?1, ?2, ?3, ?4)\
                  ",
-        params![String::from("https://www.google.com"), 2, 80, 86400],
+        params![String::from("https://news.gov.bc.ca/"), 600, 80, 86400],
     );
     Ok(conn)
 }

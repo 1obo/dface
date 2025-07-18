@@ -1,4 +1,5 @@
 #![allow(unused)]
+use tokio::time::sleep;
 use chrono::*;
 use image::*;
 use image_hasher::*;
@@ -32,8 +33,8 @@ struct Page {
     image: Option<Vec<u8>>,
     phash: String,
 }
-#[tokio::main]
-async fn main() -> Result<(), String> {
+
+fn main() -> Result<(), String> {
     // Creating the database connection
     let filename = String::from("dface.sqlite");
     let conn = get_data_base_connection(&filename).expect("Failed to get database connection");
@@ -180,6 +181,7 @@ async fn get_page(uri: &String, conn: &Connection) -> Option<Page> {
         .goto(uri)
         .await
         .expect("Failed to get URI from WebDriver");
+    tokio::time::sleep(Duration::seconds(3).to_std().unwrap());
     let html = driver
         .source()
         .await
@@ -295,7 +297,7 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                  (uri, frequency, threshold, retention) \
                  VALUES (?1, ?2, ?3, ?4)\
                  ",
-        params![String::from("https://news.gov.bc.ca/"), 600, 80, 86400],
+        params![String::from("example.com"), 600, 80, 86400],
     );
     Ok(conn)
 }

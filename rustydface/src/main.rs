@@ -54,8 +54,11 @@ async fn main() -> Result<(), String> {
             ));
         }
     }
-
+    let mut foo:u32 = 0;
+    let mut var:u32 = 4444;
     for monitor in &monitors {
+        foo +=1;
+        let port = foo+var;
         delete_expired(&monitor.uri, &monitor.retention, &conn);
         let latest_page = get_latest_page(&monitor.uri, &conn);
         if latest_page.is_none() {
@@ -65,7 +68,7 @@ async fn main() -> Result<(), String> {
                 .map(|monitor| {
                     let mut uri = monitor.uri.clone();
                     println!("No page found for {:?}. Creating page now...", &monitor.uri);
-                    let handle = spawn(get_page(uri));
+                    let handle = spawn(get_page(uri, port));
                     handle
                 })
                 .collect();
@@ -94,7 +97,7 @@ async fn main() -> Result<(), String> {
                     .map(|monitor| {
                         let mut uri = monitor.uri.clone();
                         println!("No page found for {:?}. Creating page now...", &monitor.uri);
-                        let handle = spawn(get_page(uri));
+                        let handle = spawn(get_page(uri, port));
                         handle
                     })
                     .collect();
@@ -192,10 +195,11 @@ fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
         ],
     )
 }
-async fn get_page(uri: String) -> Option<Page> {
+async fn get_page(uri: String, port: u32) -> Option<Page> {
     let mut capabilities = DesiredCapabilities::firefox();
     capabilities.add_arg("--headless");
-    let driver = WebDriver::new("http://localhost:4444", capabilities)
+    let driver_port = ("http://localhost:{}", port);
+    let driver = WebDriver::new(driver_port, capabilities)
         .await
         .expect("Failed to connect to WebDriver");
     let tools = FirefoxTools::new(driver.handle.clone());

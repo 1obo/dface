@@ -99,8 +99,8 @@ fn main() -> Result<(), String> {
                     let log_type:String = "LOG".to_string();
                     let message = format!(
                         "\
-                    The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}",
-                        &monitor.uri, &latest_page.timestamp, &diff
+                    The uri:{:?} has logged regular behaviour at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}. SSHash similarity recorded as:{:?}, and Phash similarity recorded as:{:?}",
+                        &monitor.uri, &new_page.timestamp, &diff[0], &diff[1], &diff[2]
                     );
                     let logs = get_logs(&new_page.timestamp, &log_type, &message, &conn);
                     save_logs(&logs, &conn).expect("Failed to save logs");

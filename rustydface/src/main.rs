@@ -80,12 +80,12 @@ fn main() -> Result<(), String> {
                 //compare expired pages for differences
                 let diff = compare_pages(&new_page, &latest_page);
                 //if differences are greater than monitors threshold:
-                if diff < monitor.threshold {
+                if diff[0] < monitor.threshold {
                     let log_type:String = "ALERT".to_string();
                     let message = format!(
                         "\
-                    The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}",
-                        &monitor.uri, &new_page.timestamp, &diff
+                    The uri:{:?} has been detected for potential defacement at timestamp:{:?}. Recorded cumulative hash similarity of: {:?}. SSHash similarity recorded as:{:?}, and Phash similarity recorded as:{:?}",
+                        &monitor.uri, &new_page.timestamp, &diff[0], &diff[1], &diff[2]
                     );
                     //create alert/log
                     //store alert/log to database
@@ -135,7 +135,7 @@ fn save_logs(log:&Logging, conn: &Connection) -> Result<usize> {
         ]
     )
 }
-fn compare_pages(page1: &Page, page2: &Page) -> u32 {
+fn compare_pages(page1: &Page, page2: &Page) -> [u32; 3] {
     println!("1 {} and 2 {}", &page1.phash, &page2.phash);
     let old_sshash = &page1.sshash;
     let new_sshash = &page2.sshash;
@@ -151,7 +151,8 @@ fn compare_pages(page1: &Page, page2: &Page) -> u32 {
         "sshash similarity: {:?}, phashcomp similarity: {:?}, overall similarity: {:?}",
         sshashcomp, phashcomp, similarity_rating
     );
-    similarity_rating
+    let diff = [similarity_rating, sshashcomp, phashcomp];
+    diff
 }
 fn save_page(page: &Page, conn: &Connection) -> Result<usize> {
     conn.execute(
@@ -297,7 +298,7 @@ fn get_data_base_connection(file: &String) -> Result<Connection> {
                  (uri, frequency, threshold, retention) \
                  VALUES (?1, ?2, ?3, ?4)\
                  ",
-        params![String::from("example.com"), 600, 80, 86400],
+        params![String::from("https://www2.gov.bc.ca/gov/content/home"), 600, 80, 86400],
     );
     Ok(conn)
 }

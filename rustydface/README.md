@@ -1,4 +1,4 @@
-DFACE(Rusty)
+## DFACE(Rusty)
 
 DFACE is a lightweight CLI-based webpage defacement detection and monitoring utility. It uses the Mozilla Geckodriver for page access, and SQLite for object storage. 
 Defacements are detected through a cumulative similarity from last shot value. This value is generated through the analysis of both Fuzzy hashing(ssdeep), as well as 
@@ -34,5 +34,6 @@ perceptual hashes.
 - ✅ Historical page comparison
 - ✅ Verbose operation
 - ✅ Entirely CLI accessible (No DB Browser needed for log analysis, new monitor creation, etc.)
+
 
 

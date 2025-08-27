@@ -9,7 +9,7 @@ pub fn get_command() -> Command {
             .number_of_values(1)
             .required(false)
             .default_value("dface.sqlite")
-            .help("Define output file for program to write to. Will create file if name does not exist in working directory.")
+            .help("Define output file for program to write to. Will create file if name does not exist in working directory. If using a custom filename, ensure it is specified on every run. If not, the name of dface.sqlite will be the default.")
     )
         .arg(Arg::new("verbose")
             .action(SetTrue)

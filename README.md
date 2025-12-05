@@ -57,7 +57,7 @@ The DFACE Repo is currently locked from contribution
 
 ## License
 
-Licensed under the MIT license(Placeholder)
+Licensed under the MIT license
 
 
 
